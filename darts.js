@@ -26,10 +26,11 @@
     });
 
     const resolution = 512;
-    const textureSize = 4*resolution;
+    const textureSize = 2*resolution;
 
     const kernel = makeTexture(textureSize);
-    const board = makeTexture(textureSize);
+    const boardHighRes = makeTexture(textureSize);
+    const boardLowRes = makeTexture(textureSize);
     const fftKernel = makeTexture(textureSize);
     const fftPing = makeTexture(textureSize);
     const fftPong = makeTexture(textureSize);
@@ -68,16 +69,17 @@
         uniform vec2 uOffset;
         uniform float uNorm;
         uniform float uResolution;
+        uniform bool uHighRes;
         const float dartsSize = 170.;
         const float PI = 3.14159265359;
 
         void main() {
-            if (gl_FragCoord.x < 2.*uResolution && gl_FragCoord.y < 2.*uResolution) {
-                vec2 dartsCoords = (gl_FragCoord.xy / uResolution - 1.) * dartsSize - uOffset;
-                //float prob = exp(- dot(dartsCoords, dartsCoords) / (2. * uSigma * uSigma))
-                //           * (4. * dartsSize * dartsSize) / (2. * PI * uSigma * uSigma);
+            if (gl_FragCoord.x < uResolution && gl_FragCoord.y < uResolution) {
+                float zoomFactor = uHighRes ? 1. : 2.;
+                vec2 dartsCoords = zoomFactor * (2. * gl_FragCoord.xy / uResolution - 1.)
+                                 * dartsSize - uOffset;
                 float prob = exp(- 0.5 * dot(dartsCoords, uInvCovariance * dartsCoords))
-                           * (4. * dartsSize * dartsSize) * uNorm;
+                           * (zoomFactor * zoomFactor * dartsSize * dartsSize) * uNorm;
                 gl_FragColor = vec4(prob, 0, 0, 0);
             } else {
                 gl_FragColor = vec4(0, 0, 0, 0);
@@ -89,6 +91,7 @@
             uOffset: regl.prop("offset"),
             uNorm: regl.prop("norm"),
             uResolution: resolution,
+            uHighRes: regl.prop("highRes")
         },
         framebuffer: regl.prop("output")
     });
@@ -172,7 +175,7 @@
         `,
         uniforms: {
             uSegments: [20, 5, 12, 9, 14, 11, 8, 16, 7, 19, 3, 17, 2, 15, 10, 6, 13, 4, 18, 1],
-            uResolution: resolution
+            uResolution: regl.prop("resolution")
         },
         framebuffer: regl.prop("output")
     });
@@ -388,13 +391,22 @@
         return passes;
     }
 
-    let forwardBoardFFT = planFFT({
+    let forwardBoardHighResFFT = planFFT({
         width: textureSize,
         height: textureSize,
-        input: board,
+        input: boardHighRes,
         ping: fftPing,
         pong: fftPong,
-        output: board,
+        output: boardHighRes,
+        forward: true
+    });
+    let forwardBoardLowResFFT = planFFT({
+        width: textureSize,
+        height: textureSize,
+        input: boardLowRes,
+        ping: fftPing,
+        pong: fftPong,
+        output: boardLowRes,
         forward: true
     });
     let forwardKernelFFT = planFFT({
@@ -466,24 +478,36 @@
     });
     const reduceOps = {
         16: makeReduce(16),
+        8: makeReduce(8),
         4: makeReduce(4), 
         2: makeReduce(2)
     };
     const reduce = (opt) => {
-        reduceOps[opt.size / 256]({
-            input: opt.input,
-            output: red256,
-            offset: opt.offset,
-            inputSize: opt.totalSize,
-            firstPass: true
-        });
-        reduceOps[16]({
-            input: red256,
-            output: red16,
-            offset: 0,
-            inputSize: 256,
-            firstPass: false
-        });
+        if (opt.size > 256) {
+            reduceOps[opt.size / 256]({
+                input: opt.input,
+                output: red256,
+                offset: opt.offset,
+                inputSize: opt.totalSize,
+                firstPass: true
+            });
+            reduceOps[16]({
+                input: red256,
+                output: red16,
+                offset: 0,
+                inputSize: 256,
+                firstPass: false
+            });
+        } else {
+            reduceOps[opt.size / 16]({
+                input: opt.input,
+                output: red16,
+                offset: opt.offset,
+                inputSize: opt.totalSize,
+                firstPass: true
+            });
+
+        }
         reduceOps[16]({
             input: red16,
             output: opt.output,
@@ -524,6 +548,7 @@
         uniform sampler2D uRight;
         uniform sampler2D uRedLeft;
         uniform sampler2D uRedRight;
+        uniform bool uHighRes;
         uniform float uWidth, uHeight;
 
         // Copyright 2019 Google LLC.
@@ -560,14 +585,19 @@
                 vec2 coord = vec2(
                     gl_FragCoord.x / uWidth * 2.,
                     gl_FragCoord.y / uHeight
-                ) * 0.25 + 0.25;
+                ) * (uHighRes ? 0.5 : 0.25) + 0.25;
                 red = texture2D(uRedLeft, vec2(0.5, 0.5));
                 value = texture2D(uLeft, coord);
             } else {
                 vec2 coord = vec2(
                     gl_FragCoord.x / uWidth * 2. - 1.,
                     gl_FragCoord.y / uHeight
-                ) * 0.25 + 0.125;
+                );
+                if (uHighRes) {
+                    coord = coord * 0.5;
+                } else {
+                    coord = coord * 0.25 + 0.125;
+                }
                 red = texture2D(uRedRight, vec2(0.5, 0.5));
                 value = texture2D(uRight, coord);
             }
@@ -597,6 +627,7 @@
             uLeft: regl.prop("left"),
             uRedRight: regl.prop("redRight"),
             uRedLeft: regl.prop("redLeft"),
+            uHighRes: regl.prop("highRes"),
             uWidth: ctx => ctx.framebufferWidth,
             uHeight: ctx => ctx.framebufferHeight,
         }
@@ -629,16 +660,19 @@
 
     const render = (firstRender) => {
         regl.clear({color: [0, 0, 0, 0], depth: 1});
+        const cov = computeCovariance(
+            sliderValues.sigma,
+            sliderValues.excentricity,
+            sliderValues.angle / 180. * Math.PI
+        );
+        const highRes = sliderValues.sigma * sliderValues.excentricity < 42.;
         configureComputePasses(() => {
             if (firstRender) {
-                initBoard({output: board});
-                performFFTPasses(forwardBoardFFT);
+                initBoard({output: boardHighRes, resolution: resolution});
+                initBoard({output: boardLowRes, resolution: resolution/2});
+                performFFTPasses(forwardBoardHighResFFT);
+                performFFTPasses(forwardBoardLowResFFT);
             }
-            const cov = computeCovariance(
-                sliderValues.sigma,
-                sliderValues.excentricity,
-                sliderValues.angle / 180. * Math.PI
-            );
             initKernel({
                 output: kernel,
                 invCovariance: cov.invCovariance,
@@ -646,23 +680,28 @@
                 offset: [
                     sliderValues.xoff * sliderValues.sigma,
                     sliderValues.yoff * sliderValues.sigma
-                ]
+                ],
+                highRes: highRes
             });
             reduce({
                 input: kernel,
                 offset: 0,
-                size: 2*resolution,
-                totalSize: 4*resolution,
+                size: resolution,
+                totalSize: textureSize,
                 output: redKernel
             });
             performFFTPasses(forwardKernelFFT);
-            multiply({mat1: board, mat2: fftKernel, output: output});
+            multiply({
+                mat1: highRes ? boardHighRes : boardLowRes,
+                mat2: fftKernel,
+                output: output
+            });
             performFFTPasses(inverseOutputFFT);
             reduce({
                 input: output,
-                offset: resolution,
+                offset: resolution/2,
                 size: resolution,
-                totalSize: 4*resolution,
+                totalSize: textureSize,
                 output: redOutput
             });
         });
@@ -670,7 +709,8 @@
             left: output,
             right: kernel,
             redLeft: redOutput,
-            redRight: redKernel
+            redRight: redKernel,
+            highRes: highRes
         }));
     }
     render(true);
