@@ -618,7 +618,7 @@
                 value = texture2D(uRight, coord);
             }
             float redMax = red.x;
-            float redMin = red.y;
+            float redMin = 0.; //red.y;
             gl_FragColor = cmap((value.x - redMin) / (redMax - redMin));
             //gl_FragColor = cmap(redMax);
             //gl_FragColor = cmap(texture2D(uInput, coord).x/512./60.);
