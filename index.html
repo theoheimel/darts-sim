@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Darts</title>
+        <script language="javascript" src="https://npmcdn.com/regl/dist/regl.js"></script>
+        <script src="darts.js" type="module" defer></script>
+    </head>
+
+    <body>
+        <div style="display: flex">
+            <canvas
+                id="dist-canvas"
+                width="1024"
+                height="512"
+                style="width: 1024px; height: 512px"
+            ></canvas>
+            <div style="flex:1; padding: 1em">
+                <table>
+                    <tr>
+                        <td>X offset</td>
+                        <td><input
+                            type="range"
+                            min="-3"
+                            max="3"
+                            value="0"
+                            step="0.01"
+                            id="xoff"
+                        ></td>
+                    </tr>
+                    <tr>
+                        <td>Y offset</td>
+                        <td><input
+                            type="range"
+                            min="-3"
+                            max="3"
+                            value="0"
+                            step="0.01"
+                            id="yoff"
+                        ></td>
+                    </tr>
+                    <tr>
+                        <td>Scale</td>
+                        <td><input
+                            type="range"
+                            min="0.3"
+                            max="30"
+                            value="10"
+                            step="0.01"
+                            id="sigma"
+                        ></td>
+                    </tr>
+                    <tr>
+                        <td>Excentricity</td>
+                        <td><input
+                            type="range"
+                            min="1"
+                            max="5"
+                            value="1"
+                            step="0.01"
+                            id="excentricity"
+                        ></td>
+                    </tr>
+                    <tr>
+                        <td>Angle</td>
+                        <td><input
+                            type="range"
+                            min="-180"
+                            max="180"
+                            value="0"
+                            step="0.1"
+                            id="angle"
+                        ></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </body>
+</html>
+
