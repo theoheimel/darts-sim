@@ -70,20 +70,36 @@
         uniform float uNorm;
         uniform float uResolution;
         uniform bool uHighRes;
+
+        const int DOWNSAMPLING = 8;
+
         const float dartsSize = 170.;
         const float PI = 3.14159265359;
 
+        float kernelProb(vec2 texCoords) {
+            float zoomFactor = uHighRes ? 1. : 2.;
+            vec2 dartsCoords = zoomFactor * (2. * texCoords / uResolution - 1.)
+                             * dartsSize - uOffset;
+            return exp(- 0.5 * dot(dartsCoords, uInvCovariance * dartsCoords))
+                   * (zoomFactor * zoomFactor * dartsSize * dartsSize) * uNorm;
+
+        }
+
         void main() {
-            if (gl_FragCoord.x < uResolution && gl_FragCoord.y < uResolution) {
-                float zoomFactor = uHighRes ? 1. : 2.;
-                vec2 dartsCoords = zoomFactor * (2. * gl_FragCoord.xy / uResolution - 1.)
-                                 * dartsSize - uOffset;
-                float prob = exp(- 0.5 * dot(dartsCoords, uInvCovariance * dartsCoords))
-                           * (zoomFactor * zoomFactor * dartsSize * dartsSize) * uNorm;
-                gl_FragColor = vec4(prob, 0, 0, 0);
-            } else {
+            if (gl_FragCoord.x >= uResolution || gl_FragCoord.y >= uResolution) {
                 gl_FragColor = vec4(0, 0, 0, 0);
+                return;
             }
+
+            float prob = 0.;
+            for (int i = 0; i < DOWNSAMPLING; i++) {
+                for (int j = 0; j < DOWNSAMPLING; j++) {
+                    vec2 offset = (vec2(i,j) + 0.5) / float(DOWNSAMPLING) - 0.5;
+                    prob += kernelProb(gl_FragCoord.xy + offset);
+                }
+            }
+            //float score = dartsScore(gl_FragCoord.xy);
+            gl_FragColor = vec4(prob / float(DOWNSAMPLING * DOWNSAMPLING), 0, 0, 0);
         }
         `,
         uniforms: {
