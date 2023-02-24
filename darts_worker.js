@@ -2,28 +2,32 @@ importScripts("https://npmcdn.com/regl/dist/regl.js");
 
 let sliderValues = {};
 let slidersChanged = true;
+let regl, tick;
 
 onmessage = (evt) => {
     Object.assign(sliderValues, evt.data.sliderValues);
     slidersChanged = true;
 
-    if (!("canvas" in evt.data)) return;
+    if ("canvas" in evt.data) {
+        regl = createREGL({
+            canvas: evt.data.canvas,
+            attributes: {
+                antialias: true,
+            },
+            extensions: [
+                'OES_texture_float',
+                'OES_texture_float_linear',
+                'ANGLE_instanced_arrays',
+                'WEBGL_color_buffer_float'
+            ],
+            optionalExtensions: [
+            ]
+        });
+    }
 
-    const regl = createREGL({
-        canvas: evt.data.canvas,
-        attributes: {
-            antialias: true,
-        },
-        extensions: [
-            'OES_texture_float',
-            'OES_texture_float_linear',
-            'ANGLE_instanced_arrays',
-            'WEBGL_color_buffer_float'
-        ],
-        optionalExtensions: [
-        ]
-    });
+    if (!("resolution" in evt.data.sliderValues)) return;
 
+    if (tick !== undefined) tick.cancel();
     const makeTexture = (pixels, filter='nearest') => regl.framebuffer({
         color: regl.texture({
             width: pixels,
@@ -35,7 +39,7 @@ onmessage = (evt) => {
         })
     });
 
-    const resolution = 512;
+    const resolution = 2**evt.data.sliderValues.resolution;
     const textureSize = 2*resolution;
 
     const kernel = makeTexture(textureSize, 'linear');
@@ -716,7 +720,7 @@ onmessage = (evt) => {
     }
     render(true);
 
-    regl.frame(() => {
+    tick = regl.frame(() => {
         if (!slidersChanged) return;
         slidersChanged = false;
         render(false);
