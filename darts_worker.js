@@ -663,66 +663,106 @@ onmessage = (evt) => {
         }
     });
 
+    let passes = [];
+    let passesPerFrame = 10;
+    let highRes;
+
+    const passFunc = (func, ...args) => () => func(...args);
     const render = (firstRender) => {
-        regl.clear({color: [0, 0, 0, 0], depth: 1});
-        const cov = computeCovariance(
-            sliderValues.sigma,
-            sliderValues.excentricity,
-            sliderValues.angle / 180. * Math.PI
-        );
-        const highRes = sliderValues.sigma * sliderValues.excentricity < 42.;
-        configureComputePasses(() => {
+        if (passes.length === 0) {
+            const cov = computeCovariance(
+                sliderValues.sigma,
+                sliderValues.excentricity,
+                sliderValues.angle / 180. * Math.PI
+            );
+            highRes = sliderValues.sigma * sliderValues.excentricity < 42.;
+            slidersChanged = false;
+
             if (firstRender) {
-                initBoard({output: boardHighRes, resolution: resolution});
-                initBoard({output: boardLowRes, resolution: resolution/2});
-                performFFTPasses(forwardBoardHighResFFT);
-                performFFTPasses(forwardBoardLowResFFT);
+                passes.push(
+                    passFunc(initBoard, {output: boardHighRes, resolution: resolution}),
+                    passFunc(initBoard, {output: boardLowRes, resolution: resolution/2}),
+                    ...forwardBoardHighResFFT.map(
+                        pass => passFunc(performFFTPasses, pass)
+                    ),
+                    ...forwardBoardLowResFFT.map(
+                        pass => passFunc(performFFTPasses, pass)
+                    ),
+                );
             }
-            initKernel({
-                output: kernel,
-                invCovariance: cov.invCovariance,
-                norm: cov.norm,
-                offset: [
-                    sliderValues.xoff * sliderValues.sigma,
-                    sliderValues.yoff * sliderValues.sigma
-                ],
-                highRes: highRes
-            });
-            reduce({
-                input: kernel,
-                offset: 0,
-                size: resolution,
-                totalSize: textureSize,
-                output: redKernel
-            });
-            performFFTPasses(forwardKernelFFT);
-            multiply({
-                mat1: highRes ? boardHighRes : boardLowRes,
-                mat2: fftKernel,
-                output: output
-            });
-            performFFTPasses(inverseOutputFFT);
-            reduce({
-                input: output,
-                offset: resolution/2,
-                size: resolution,
-                totalSize: textureSize,
-                output: redOutput
-            });
+            passes.push(
+                passFunc(initKernel, {
+                    output: kernel,
+                    invCovariance: cov.invCovariance,
+                    norm: cov.norm,
+                    offset: [
+                        sliderValues.xoff * sliderValues.sigma,
+                        sliderValues.yoff * sliderValues.sigma
+                    ],
+                    highRes: highRes
+                }),
+                passFunc(reduce, {
+                    input: kernel,
+                    offset: 0,
+                    size: resolution,
+                    totalSize: textureSize,
+                    output: redKernel
+                }),
+                ...forwardKernelFFT.map(
+                    pass => passFunc(performFFTPasses, pass)
+                ),
+                passFunc(multiply, {
+                    mat1: highRes ? boardHighRes : boardLowRes,
+                    mat2: fftKernel,
+                    output: output
+                }),
+                ...inverseOutputFFT.map(
+                    pass => passFunc(performFFTPasses, pass)
+                ),
+                passFunc(reduce, {
+                    input: output,
+                    offset: resolution/2,
+                    size: resolution,
+                    totalSize: textureSize,
+                    output: redOutput
+                })
+            );
+        }
+
+        configureComputePasses(() => {
+            passes.splice(0, passesPerFrame).map(pass => pass());
         });
-        configureViewport(() => drawTexture({
-            left: output,
-            right: kernel,
-            redLeft: redOutput,
-            redRight: redKernel,
-            highRes: highRes
-        }));
+        if (passes.length == 0) {
+            regl.clear({color: [0, 0, 0, 0], depth: 1});
+            configureViewport(() => drawTexture({
+                left: output,
+                right: kernel,
+                redLeft: redOutput,
+                redRight: redKernel,
+                highRes: highRes
+            }));
+        }
     }
     render(true);
 
-    tick = regl.frame(() => {
-        if (!slidersChanged) return;
-        slidersChanged = false;
+    let prevFrameRender = false;
+    let lastTime;
+    const targetFPS = 30, maxPassesPerFrame = 100;
+    tick = regl.frame((ctx) => {
+        if (prevFrameRender) {
+            const fps = 1 / (ctx.time - lastTime);
+            if (fps < targetFPS) {
+                passesPerFrame = Math.max(1, Math.round(0.95 * passesPerFrame * fps / targetFPS));
+            } else if (passes.length > 0) {
+                passesPerFrame = Math.min(100, Math.round(passesPerFrame * 1.1));
+            }
+        }
+        lastTime = ctx.time;
+        if (!slidersChanged && passes.length === 0) {
+            prevFrameRender = false;
+            return;
+        }
         render(false);
+        prevFrameRender = true;
     });
 }
